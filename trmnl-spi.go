@@ -13,10 +13,15 @@ import (
 	"path/filepath"
 	"time"
 
-	waveshare "github.com/wiless/waveshare" // New library
-	"github.com/disintegration/imaging"     // For image processing
-	_ "image/jpeg"                          // Register JPEG decoder
-	_ "image/png"                           // Register PNG decoder
+	"github.com/disintegration/imaging"
+	"periph.io/x/conn/v3/gpio"
+	"periph.io/x/conn/v3/gpio/gpioreg"
+	"periph.io/x/conn/v3/physic"
+	"periph.io/x/conn/v3/spi"
+	"periph.io/x/conn/v3/spi/spireg"
+	"periph.io/x/host/v3"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 // Version information
@@ -44,28 +49,20 @@ type AppOptions struct {
 	Verbose  bool
 }
 
-// SPIConfig holds SPI and GPIO pin configuration for the Waveshare e-ink display
-type SPIConfig struct {
-	RSTPin  int // Reset pin
-	DCPin   int // Data/Command pin
-	CSPin   int // Chip Select pin
-	BusyPin int // Busy pin
-	Width   int // Display width in pixels
-	Height  int // Display height in pixels
+// EPD holds the display configuration
+type EPD struct {
+	rstPin  gpio.PinIO
+	dcPin   gpio.PinIO
+	csPin   gpio.PinIO
+	busyPin gpio.PinIO
+	pwrPin  gpio.PinIO
+	spiPort spi.PortCloser
+	Width   int
+	Height  int
 }
 
 var (
-	// SPI configuration for EPD7in5_V2
-	spiConfig = SPIConfig{
-		RSTPin:  17,  // GPIO17
-		DCPin:   25,  // GPIO25
-		CSPin:   8,   // GPIO8 (SPI0 CS0)
-		BusyPin: 24,  // GPIO24
-		Width:   800, // EPD7in5_V2 resolution: 800x480
-		Height:  480,
-	}
-
-	display *waveshare.EPD // Global EPD instance
+	epd *EPD
 )
 
 func main() {
@@ -115,14 +112,41 @@ func main() {
 	}
 }
 
-// initDisplay initializes the Waveshare e-ink display
 func initDisplay() error {
-	var err error
-	display, err = waveshare.NewEPD(waveshare.EPD7in5v2, spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
-	if err != nil {
-		return fmt.Errorf("error creating EPD instance: %v", err)
+	if _, err := host.Init(); err != nil {
+		return fmt.Errorf("error initializing periph: %v", err)
 	}
-	err = display.Init()
+
+	rstPin := gpioreg.ByName("GPIO17")
+	dcPin := gpioreg.ByName("GPIO25")
+	csPin := gpioreg.ByName("GPIO8")
+	busyPin := gpioreg.ByName("GPIO24")
+	pwrPin := gpioreg.ByName("GPIO18")
+
+	if rstPin == nil || dcPin == nil || csPin == nil || busyPin == nil || pwrPin == nil {
+		return fmt.Errorf("failed to find GPIO pins")
+	}
+
+	spiPort, err := spireg.Open("/dev/spidev0.0")
+	if err != nil {
+		return fmt.Errorf("error opening SPI: %v", err)
+	}
+	if err := spiPort.LimitSpeed(2 * physic.MegaHertz); err != nil {
+		return fmt.Errorf("error setting SPI speed: %v", err)
+	}
+
+	epd = &EPD{
+		rstPin:  rstPin,
+		dcPin:   dcPin,
+		csPin:   csPin,
+		busyPin: busyPin,
+		pwrPin:  pwrPin,
+		spiPort: spiPort,
+		Width:   800,
+		Height:  480,
+	}
+
+	err = epd.init()
 	if err != nil {
 		return fmt.Errorf("error initializing EPD: %v", err)
 	}
@@ -130,25 +154,110 @@ func initDisplay() error {
 	return nil
 }
 
-// cleanupDisplay handles cleanup on exit
+func (e *EPD) init() error {
+	// Power on
+	e.pwrPin.Out(gpio.High)
+	time.Sleep(100 * time.Millisecond)
+
+	// Reset
+	e.rstPin.Out(gpio.Low)
+	time.Sleep(200 * time.Millisecond)
+	e.rstPin.Out(gpio.High)
+	time.Sleep(200 * time.Millisecond)
+
+	e.sendCommand(0x12) // Soft reset
+	time.Sleep(2 * time.Millisecond)
+	for e.busyPin.Read() == gpio.High {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	e.sendCommand(0x01) // Driver output control
+	e.sendData(0xDF)    // 800-1 = 799 (little-endian: DF 02)
+	e.sendData(0x02)
+	e.sendData(0x00)
+
+	e.sendCommand(0x03) // Gate driving voltage
+	e.sendData(0x00)
+
+	e.sendCommand(0x04) // Source driving voltage
+	e.sendData(0x41)
+	e.sendData(0xA8)
+	e.sendData(0x32)
+
+	e.sendCommand(0x11) // Data entry mode
+	e.sendData(0x03)
+
+	e.sendCommand(0x44) // X address start/end
+	e.sendData(0x00)
+	e.sendData(0x63) // 800/8 - 1 = 99 (0x63)
+
+	e.sendCommand(0x45) // Y address start/end
+	e.sendData(0x00)
+	e.sendData(0x00)
+	e.sendData(0xDF) // 479 (little-endian: DF 01)
+	e.sendData(0x01)
+
+	e.sendCommand(0x4E) // X address counter
+	e.sendData(0x00)
+
+	e.sendCommand(0x4F) // Y address counter
+	e.sendData(0x00)
+	e.sendData(0x00)
+
+	return nil
+}
+
+func (e *EPD) sendCommand(cmd byte) {
+	e.dcPin.Out(gpio.Low)
+	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
+	conn.Tx([]byte{cmd}, nil)
+}
+
+func (e *EPD) sendData(data byte) {
+	e.dcPin.Out(gpio.High)
+	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
+	conn.Tx([]byte{data}, nil)
+}
+
 func cleanupDisplay() {
-	if display != nil {
-		display.Sleep()
+	if epd != nil {
+		epd.sleep()
+		epd.spiPort.Close()
 		fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
 	}
 }
 
-// clearDisplay clears the e-ink display
-func clearDisplay() {
-	fmt.Println("Clearing e-ink display...")
-	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8) // 800x480 / 8 = 48000 bytes
-	for i := range buffer {
-		buffer[i] = 0xFF // All white
-	}
-	display.Display(buffer)
+func (e *EPD) sleep() {
+	e.sendCommand(0x10) // Deep sleep
+	e.sendData(0x01)
+	time.Sleep(200 * time.Millisecond)
+	e.pwrPin.Out(gpio.Low) // Power off
 }
 
-// processNextImage handles fetching and displaying images
+func clearDisplay() {
+	fmt.Println("Clearing e-ink display...")
+	buffer := make([]byte, 800*480/8)
+	for i := range buffer {
+		buffer[i] = 0xFF // White
+	}
+	epd.display(buffer)
+}
+
+func (e *EPD) display(buffer []byte) error {
+	e.sendCommand(0x24) // Write RAM
+	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
+	e.dcPin.Out(gpio.High)
+	conn.Tx(buffer, nil)
+
+	e.sendCommand(0x22) // Display update control
+	e.sendData(0xC7)
+	e.sendCommand(0x20) // Master activation
+	for e.busyPin.Read() == gpio.High {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
 func processNextImage(tmpDir, apiKey string, options AppOptions) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -232,20 +341,17 @@ func processNextImage(tmpDir, apiKey string, options AppOptions) {
 	time.Sleep(time.Duration(refreshRate) * time.Second)
 }
 
-// displayImage processes and sends the image to the Waveshare e-ink display
 func displayImage(imagePath string, options AppOptions) error {
 	if options.Verbose {
 		fmt.Printf("Reading image from %s\n", imagePath)
 	}
 
-	// Detect content type
 	file, err := os.Open(imagePath)
 	if err != nil {
 		return fmt.Errorf("error opening image file for detection: %v", err)
 	}
 	defer file.Close()
 
-	// Read first 512 bytes for content type detection
 	buffer := make([]byte, 512)
 	_, err = file.Read(buffer)
 	if err != nil && err != io.EOF {
@@ -253,7 +359,6 @@ func displayImage(imagePath string, options AppOptions) error {
 	}
 	contentType := http.DetectContentType(buffer)
 
-	// Reset file position
 	_, err = file.Seek(0, 0)
 	if err != nil {
 		return fmt.Errorf("error resetting file pointer: %v", err)
@@ -267,7 +372,7 @@ func displayImage(imagePath string, options AppOptions) error {
 		if err != nil {
 			return fmt.Errorf("error converting BMP to PNG with convert: %v", err)
 		}
-		defer os.Remove(pngPath) // Clean up temporary PNG
+		defer os.Remove(pngPath)
 		imgPath = pngPath
 	} else {
 		imgPath = imagePath
@@ -284,16 +389,14 @@ func displayImage(imagePath string, options AppOptions) error {
 		return fmt.Errorf("error decoding image: %v", err)
 	}
 
-	// Resize image to match EPD7in5_V2 dimensions (800x480)
-	resizedImg := imaging.Resize(img, spiConfig.Width, spiConfig.Height, imaging.NearestNeighbor)
+	resizedImg := imaging.Resize(img, epd.Width, epd.Height, imaging.NearestNeighbor)
 
-	// Convert to monochrome (1-bit) for e-ink
 	monoImg := image.NewGray(resizedImg.Bounds())
 	threshold := uint8(128)
 	for y := 0; y < resizedImg.Bounds().Dy(); y++ {
 		for x := 0; x < resizedImg.Bounds().Dx(); x++ {
 			r, g, b, _ := resizedImg.At(x, y).RGBA()
-			gray := uint8((r*299 + g*587 + b*114) / 1000 >> 8) // ITU-R 601-2 luma transform
+			gray := uint8((r*299 + g*587 + b*114) / 1000 >> 8)
 			if options.DarkMode {
 				if gray < threshold {
 					monoImg.SetGray(x, y, color.Gray{255}) // White
@@ -310,24 +413,31 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
-	// Convert monoImg to byte buffer for waveshare
-	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8) // 800x480 / 8 = 48000 bytes
-	for y := 0; y < spiConfig.Height; y++ {
-		for x := 0; x < spiConfig.Width; x++ {
+	// Convert to buffer (Black=0, White=1)
+	buffer = make([]byte, epd.Width*epd.Height/8)
+	for y := 0; y < epd.Height; y++ {
+		for x := 0; x < epd.Width; x++ {
 			gray := monoImg.GrayAt(x, y).Y
-			bitPos := y*spiConfig.Width + x
+			bitPos := y*epd.Width + x
 			bytePos := bitPos / 8
 			bitOffset := uint(7 - (bitPos % 8))
 			if gray == 0 { // Black
-				buffer[bytePos] |= (1 << bitOffset)
+				buffer[bytePos] &^= (1 << bitOffset) // Clear bit (0)
 			} else { // White
-				buffer[bytePos] &^= (1 << bitOffset)
+				buffer[bytePos] |= (1 << bitOffset) // Set bit (1)
 			}
 		}
 	}
 
-	// Display the buffer
-	err = display.Display(buffer)
+	err = imaging.Save(monoImg, "debug_buffer.png")
+	if err != nil {
+		return fmt.Errorf("error saving debug buffer image: %v", err)
+	}
+	if options.Verbose {
+		fmt.Println("Saved debug_buffer.png for inspection")
+	}
+
+	err = epd.display(buffer)
 	if err != nil {
 		return fmt.Errorf("error displaying buffer: %v", err)
 	}
@@ -338,7 +448,6 @@ func displayImage(imagePath string, options AppOptions) error {
 	return nil
 }
 
-// parseCommandLineArgs parses command line arguments
 func parseCommandLineArgs() AppOptions {
 	darkMode := flag.Bool("d", false, "Enable dark mode (invert monochrome images)")
 	showVersion := flag.Bool("v", false, "Show version information")
@@ -357,7 +466,6 @@ func parseCommandLineArgs() AppOptions {
 	}
 }
 
-// Helper functions (loadConfig, saveConfig)
 func loadConfig(configDir string) Config {
 	configFile := filepath.Join(configDir, "config.json")
 	config := Config{}
@@ -378,6 +486,6 @@ func saveConfig(configDir string, config Config) {
 	}
 	err = os.WriteFile(configFile, data, 0600)
 	if err != nil {
-		fmt.Printf("Error writing config file: %v", err)
+		fmt.Printf("Error writing config file: %v\n", err)
 	}
 }
