@@ -165,11 +165,9 @@ func initDisplay() error {
 }
 
 func (e *EPD) init() error {
-	// Power on
 	e.pwrPin.Out(gpio.High)
 	time.Sleep(100 * time.Millisecond)
 
-	// Reset
 	e.rstPin.Out(gpio.Low)
 	time.Sleep(200 * time.Millisecond)
 	e.rstPin.Out(gpio.High)
@@ -245,7 +243,7 @@ func (e *EPD) sleep() {
 	e.sendCommand(0x10) // Deep sleep
 	e.sendData(0x01)
 	time.Sleep(200 * time.Millisecond)
-	e.pwrPin.Out(gpio.Low) // Power off
+	e.pwrPin.Out(gpio.Low)
 }
 
 func clearDisplay() {
@@ -258,39 +256,23 @@ func clearDisplay() {
 	if err != nil {
 		fmt.Printf("Error clearing display: %v\n", err)
 	}
-	time.Sleep(2 * time.Second) // Allow refresh
+	time.Sleep(2 * time.Second)
 }
 
-func (e *EPD) display(buffer []byte) error {
-	const maxTxSize = 4096 // Maximum bytes per SPI transfer
-
-	// Write black RAM
-	e.sendCommand(0x24)
-	e.dcPin.Out(gpio.High)
-	if e.conn == nil {
-		return fmt.Errorf("SPI connection is nil")
+func testDisplay() {
+	fmt.Println("Testing display with pattern...")
+	buffer := make([]byte, 800*480/8)
+	for i := 0; i < len(buffer)/2; i++ {
+		buffer[i] = 0x00 // Black
 	}
-	for i := 0; i < len(buffer); i += maxTxSize {
-		end := i + maxTxSize
-		if end > len(buffer) {
-			end = len(buffer)
-		}
-		chunk := buffer[i:end]
-		err := e.conn.Tx(chunk, nil)
-		if err != nil {
-			return fmt.Errorf("error sending buffer chunk %d-%d: %v", i, end, err)
-		}
+	for i := len(buffer)/2; i < len(buffer); i++ {
+		buffer[i] = 0xFF // White
 	}
-
-	// Update display (from epd7in5_V2.py)
-	e.sendCommand(0x22) // Display Update Control 2
-	e.sendData(0xC7)    // Enable clock, analog, and display
-	e.sendCommand(0x20) // Master Activation
-	for e.busyPin.Read() == gpio.High {
-		time.Sleep(10 * time.Millisecond)
+	err := epd.display(buffer)
+	if err != nil {
+		fmt.Printf("Error testing display: %v\n", err)
 	}
-
-	return nil
+	time.Sleep(2 * time.Second)
 }
 
 func (e *EPD) display(buffer []byte) error {
@@ -301,8 +283,6 @@ func (e *EPD) display(buffer []byte) error {
 	if e.conn == nil {
 		return fmt.Errorf("SPI connection is nil")
 	}
-
-	// Split buffer into chunks
 	for i := 0; i < len(buffer); i += maxTxSize {
 		end := i + maxTxSize
 		if end > len(buffer) {
@@ -315,12 +295,13 @@ func (e *EPD) display(buffer []byte) error {
 		}
 	}
 
-	e.sendCommand(0x22) // Display update control
-	e.sendData(0xC7)
-	e.sendCommand(0x20) // Master activation
+	e.sendCommand(0x22) // Display Update Control 2
+	e.sendData(0xC7)    // Enable clock, analog, and display
+	e.sendCommand(0x20) // Master Activation
 	for e.busyPin.Read() == gpio.High {
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	return nil
 }
 
@@ -479,7 +460,7 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
-	// In displayImage, replace buffer creation:
+	// Convert to buffer (Black=0, White=1)
 	buffer = make([]byte, epd.Width*epd.Height/8)
 	for y := 0; y < epd.Height; y++ {
 		for x := 0; x < epd.Width; x++ {
@@ -488,9 +469,9 @@ func displayImage(imagePath string, options AppOptions) error {
 			bytePos := bitPos / 8
 			bitOffset := uint(7 - (bitPos % 8))
 			if gray == 0 { // Black
-				buffer[bytePos] |= (1 << bitOffset) // Set bit (1) for black
+				buffer[bytePos] &^= (1 << bitOffset) // Clear bit (0)
 			} else { // White
-				buffer[bytePos] &^= (1 << bitOffset) // Clear bit (0) for white
+				buffer[bytePos] |= (1 << bitOffset) // Set bit (1)
 			}
 		}
 	}
@@ -530,22 +511,6 @@ func parseCommandLineArgs() AppOptions {
 		DarkMode: *darkMode,
 		Verbose:  *verbose && !*quiet,
 	}
-}
-
-func testDisplay() {
-	fmt.Println("Testing display with pattern...")
-	buffer := make([]byte, 800*480/8)
-	for i := 0; i < len(buffer)/2; i++ {
-		buffer[i] = 0x00 // Black
-	}
-	for i := len(buffer)/2; i < len(buffer); i++ {
-		buffer[i] = 0xFF // White
-	}
-	err := epd.display(buffer)
-	if err != nil {
-		fmt.Printf("Error testing display: %v\n", err)
-	}
-	time.Sleep(2 * time.Second)
 }
 
 func loadConfig(configDir string) Config {
