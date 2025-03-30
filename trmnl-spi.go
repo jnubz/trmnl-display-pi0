@@ -250,7 +250,7 @@ func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
 	buffer := make([]byte, 800*480/8)
 	for i := range buffer {
-		buffer[i] = 0xFF // White (assuming 1 = white)
+		buffer[i] = 0x00 // White (assuming 1 = white)
 	}
 	err := epd.display(buffer)
 	if err != nil {
