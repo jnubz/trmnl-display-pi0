@@ -11,7 +11,7 @@ require (
 	github.com/gonutz/framebuffer v1.0.0 // indirect
 	github.com/mat/besticon v3.12.0+incompatible // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/stianeikeland/go-rpio/v4 v4.4.0 // indirect
+	github.com/stianeikeland/go-rpio/v4 v4.6.0 // indirect
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect

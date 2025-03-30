@@ -65,8 +65,6 @@ var (
 		Width:   800, // EPD7in5_V2 resolution: 800x480
 		Height:  480,
 	}
-	// Global Waveshare display instance
-	display *waveshare.EPD
 )
 
 func main() {
@@ -118,42 +116,28 @@ func main() {
 
 // initDisplay initializes the Waveshare e-ink display
 func initDisplay() error {
-	display = waveshare.NewEPD(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
-	err := display.Init()
-	if err != nil {
-		return fmt.Errorf("failed to initialize Waveshare e-ink display: %v", err)
-	}
+	waveshare.Initialize()
 	fmt.Println("Waveshare 7.5\" e-ink display (V2) initialized successfully")
 	return nil
 }
 
 // cleanupDisplay handles cleanup on exit
 func cleanupDisplay() {
-	if display != nil {
-		display.Sleep()
-		fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
-	}
+	waveshare.Sleep()
+	fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
+	waveshare.Exit() // Release SPI/GPIO
 }
 
-// clearDisplay clears the e-ink display
+// clearDisplay clears the e-ink display by displaying a white image
 func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
-	err := display.Clear() // No argument, per library
-	if err != nil {
-		fmt.Printf("Error clearing display: %v\n", err)
+	whiteImg := image.NewGray(image.Rect(0, 0, spiConfig.Width, spiConfig.Height))
+	for y := 0; y < spiConfig.Height; y++ {
+		for x := 0; x < spiConfig.Width; x++ {
+			whiteImg.SetGray(x, y, color.Gray{255}) // White
+		}
 	}
-}
-
-// setupSignalHandling sets up handlers for SIGINT, SIGTERM, and SIGHUP
-func setupSignalHandling() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	go func() {
-		<-c
-		fmt.Println("\nReceived termination signal. Cleaning up...")
-		cleanupDisplay()
-		os.Exit(0)
-	}()
+	waveshare.DisplayImage(whiteImg)
 }
 
 // processNextImage handles fetching and displaying images
@@ -283,23 +267,8 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
-	// Convert to Waveshare-compatible buffer (800x480 = 38400 bytes, 1 bit per pixel)
-	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8)
-	for y := 0; y < spiConfig.Height; y++ {
-		for x := 0; x < spiConfig.Width; x++ {
-			if monoImg.GrayAt(x, y).Y == 0 { // Black pixel
-				bytePos := (y*spiConfig.Width + x) / 8
-				bitPos := 7 - (x % 8)
-				buffer[bytePos] |= 1 << bitPos
-			}
-		}
-	}
-
-	// Display the image
-	err = display.Display(buffer)
-	if err != nil {
-		return fmt.Errorf("error displaying image on Waveshare e-ink display: %v", err)
-	}
+	// Display the monochrome image
+	waveshare.DisplayImage(monoImg)
 
 	if options.Verbose {
 		fmt.Println("Image displayed on Waveshare 7.5\" e-ink display")
