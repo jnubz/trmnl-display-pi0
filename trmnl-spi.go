@@ -6,26 +6,19 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
-	_ "image/jpeg" // Register JPEG decoder
-	_ "image/png"  // Register PNG decoder
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/disintegration/imaging" // For image processing
-	// Replace with your specific e-ink display library, e.g., github.com/elecnix/epd or Waveshare's library
-	// For this example, I'll use a placeholder "epd" package
-	"epd" // Hypothetical import; replace with actual library like "github.com/waveshare/e-Paper/Go"
+	"github.com/ChristianHering/WaveShare" // Waveshare e-Paper library
+	"github.com/disintegration/imaging"     // For image processing
+	_ "image/jpeg"                         // Register JPEG decoder
+	_ "image/png"                          // Register PNG decoder
 )
 
 // Version information
@@ -53,43 +46,33 @@ type AppOptions struct {
 	Verbose  bool
 }
 
-// SPIConfig holds SPI and GPIO pin configuration for the e-ink display
+// SPIConfig holds SPI and GPIO pin configuration for the Waveshare e-ink display
 type SPIConfig struct {
-	Device     string // e.g., "/dev/spidev0.0"
-	RSTPin     int    // Reset pin
-	DCPin      int    // Data/Command pin
-	BusyPin    int    // Busy pin
-	CSPin      int    // Chip Select pin (optional)
-	Width      int    // Display width in pixels
-	Height     int    // Display height in pixels
+	RSTPin  int // Reset pin
+	DCPin   int // Data/Command pin
+	CSPin   int // Chip Select pin
+	BusyPin int // Busy pin
+	Width   int // Display width in pixels
+	Height  int // Display height in pixels
 }
 
 var (
-	// Global SPI configuration (adjust based on your display and wiring)
+	// SPI configuration for EPD7in5_V2
 	spiConfig = SPIConfig{
-		Device:  "/dev/spidev0.0",
-		RSTPin:  17, // GPIO17
-		DCPin:   25, // GPIO25
-		BusyPin: 24, // GPIO24
-		CSPin:   8,  // GPIO8 (optional)
-		Width:   250, // Example: 2.13" Waveshare display is 250x122
-		Height:  122,
+		RSTPin:  17,  // GPIO17
+		DCPin:   25,  // GPIO25
+		CSPin:   8,   // GPIO8 (SPI0 CS0)
+		BusyPin: 24,  // GPIO24
+		Width:   800, // EPD7in5_V2 resolution: 800x480
+		Height:  480,
 	}
-	// Global e-ink display driver instance
-	display *epd.EPD // Replace with your actual driver type
+	// Global Waveshare display instance for 7.5" V2
+	display *WaveShare.EPD7in5V2
 )
 
 func main() {
-	// Check root privileges
-	checkRoot()
-
-	// Parse command line arguments
 	options := parseCommandLineArgs()
 
-	// Set up signal handling for clean exit
-	setupSignalHandling()
-
-	// Initialize the e-ink display
 	err := initDisplay()
 	if err != nil {
 		fmt.Printf("Error initializing e-ink display: %v\n", err)
@@ -97,7 +80,6 @@ func main() {
 	}
 	defer cleanupDisplay()
 
-	// Create a configuration directory
 	configDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Printf("Error getting home directory: %v\n", err)
@@ -110,7 +92,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get API key
 	config := loadConfig(configDir)
 	if config.APIKey == "" {
 		config.APIKey = os.Getenv("TRMNL_API_KEY")
@@ -122,7 +103,6 @@ func main() {
 		saveConfig(configDir, config)
 	}
 
-	// Create a temporary directory for storing images
 	tmpDir, err := os.MkdirTemp("", "trmnl-display")
 	if err != nil {
 		fmt.Printf("Error creating temp directory: %v\n", err)
@@ -130,7 +110,6 @@ func main() {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Clear the display at startup
 	clearDisplay()
 
 	for {
@@ -138,31 +117,29 @@ func main() {
 	}
 }
 
-// initDisplay initializes the SPI-connected e-ink display
+// initDisplay initializes the Waveshare 7.5" V2 e-ink display
 func initDisplay() error {
-	// Replace with actual initialization based on your library
-	// Example for a Waveshare-like display:
-	display = epd.NewEPD(spiConfig.Device, spiConfig.RSTPin, spiConfig.DCPin, spiConfig.BusyPin, spiConfig.CSPin, spiConfig.Width, spiConfig.Height)
+	display = WaveShare.NewEPD7in5V2(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
 	err := display.Init()
 	if err != nil {
-		return fmt.Errorf("failed to initialize e-ink display: %v", err)
+		return fmt.Errorf("failed to initialize Waveshare EPD7in5_V2: %v", err)
 	}
-	fmt.Println("E-ink display initialized successfully")
+	fmt.Println("Waveshare 7.5\" e-ink display (V2) initialized successfully")
 	return nil
 }
 
 // cleanupDisplay handles cleanup on exit
 func cleanupDisplay() {
 	if display != nil {
-		display.Sleep() // Put display to sleep
-		fmt.Println("E-ink display put to sleep")
+		display.Sleep()
+		fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
 	}
 }
 
 // clearDisplay clears the e-ink display
 func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
-	err := display.Clear()
+	err := display.Clear(0xFF) // 0xFF = white
 	if err != nil {
 		fmt.Printf("Error clearing display: %v\n", err)
 	}
@@ -264,7 +241,7 @@ func processNextImage(tmpDir, apiKey string, options AppOptions) {
 	time.Sleep(time.Duration(refreshRate) * time.Second)
 }
 
-// displayImage processes and sends the image to the e-ink display
+// displayImage processes and sends the image to the Waveshare e-ink display
 func displayImage(imagePath string, options AppOptions) error {
 	file, err := os.Open(imagePath)
 	if err != nil {
@@ -281,10 +258,10 @@ func displayImage(imagePath string, options AppOptions) error {
 		return fmt.Errorf("error decoding image: %v", err)
 	}
 
-	// Resize image to match display dimensions
+	// Resize image to match EPD7in5_V2 dimensions (800x480)
 	resizedImg := imaging.Resize(img, spiConfig.Width, spiConfig.Height, imaging.NearestNeighbor)
 
-	// Convert to monochrome (e-ink displays are typically 1-bit)
+	// Convert to monochrome (1-bit) for e-ink
 	monoImg := image.NewGray(resizedImg.Bounds())
 	threshold := uint8(128) // Adjust threshold as needed
 	for y := 0; y < resizedImg.Bounds().Dy(); y++ {
@@ -293,45 +270,42 @@ func displayImage(imagePath string, options AppOptions) error {
 			gray := uint8((r*299 + g*587 + b*114) / 1000 >> 8) // ITU-R 601-2 luma transform
 			if options.DarkMode {
 				if gray < threshold {
-					monoImg.SetGray(x, y, color.Gray{255})
+					monoImg.SetGray(x, y, color.Gray{255}) // White
 				} else {
-					monoImg.SetGray(x, y, color.Gray{0})
+					monoImg.SetGray(x, y, color.Gray{0}) // Black
 				}
 			} else {
 				if gray >= threshold {
-					monoImg.SetGray(x, y, color.Gray{255})
+					monoImg.SetGray(x, y, color.Gray{255}) // White
 				} else {
-					monoImg.SetGray(x, y, color.Gray{0})
+					monoImg.SetGray(x, y, color.Gray{0}) // Black
 				}
 			}
 		}
 	}
 
-	// Send to e-ink display
-	err = display.Display(monoImg)
+	// Convert to Waveshare-compatible buffer (800x480 = 38400 bytes, 1 bit per pixel)
+	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8)
+	for y := 0; y < spiConfig.Height; y++ {
+		for x := 0; x < spiConfig.Width; x++ {
+			if monoImg.GrayAt(x, y).Y == 0 { // Black pixel
+				bytePos := (y*spiConfig.Width + x) / 8
+				bitPos := 7 - (x % 8)
+				buffer[bytePos] |= 1 << bitPos
+			}
+		}
+	}
+
+	// Display the image
+	err = display.Display(buffer)
 	if err != nil {
-		return fmt.Errorf("error displaying image on e-ink: %v", err)
+		return fmt.Errorf("error displaying image on Waveshare EPD7in5_V2: %v", err)
 	}
 
 	if options.Verbose {
-		fmt.Println("Image displayed on e-ink display")
+		fmt.Println("Image displayed on Waveshare 7.5\" e-ink display")
 	}
 	return nil
-}
-
-// checkRoot verifies root privileges
-func checkRoot() {
-	currentUser, err := user.Current()
-	if err != nil {
-		fmt.Printf("Error determining current user: %v\n", err)
-		os.Exit(1)
-	}
-	if currentUser.Uid != "0" {
-		fmt.Println("This program requires root privileges to access SPI.")
-		fmt.Println("Please run with sudo or as root.")
-		os.Exit(1)
-	}
-	fmt.Println("Running with root privileges ✓")
 }
 
 // parseCommandLineArgs parses command line arguments
@@ -353,7 +327,7 @@ func parseCommandLineArgs() AppOptions {
 	}
 }
 
-// Other helper functions (loadConfig, saveConfig) remain unchanged
+// Helper functions (loadConfig, saveConfig)
 func loadConfig(configDir string) Config {
 	configFile := filepath.Join(configDir, "config.json")
 	config := Config{}
