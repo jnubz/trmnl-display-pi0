@@ -257,14 +257,25 @@ func clearDisplay() {
 }
 
 func (e *EPD) display(buffer []byte) error {
+	const maxTxSize = 4096 // Maximum bytes per SPI transfer
+
 	e.sendCommand(0x24) // Write RAM
 	e.dcPin.Out(gpio.High)
 	if e.conn == nil {
 		return fmt.Errorf("SPI connection is nil")
 	}
-	err := e.conn.Tx(buffer, nil)
-	if err != nil {
-		return fmt.Errorf("error sending buffer: %v", err)
+
+	// Split buffer into chunks
+	for i := 0; i < len(buffer); i += maxTxSize {
+		end := i + maxTxSize
+		if end > len(buffer) {
+			end = len(buffer)
+		}
+		chunk := buffer[i:end]
+		err := e.conn.Tx(chunk, nil)
+		if err != nil {
+			return fmt.Errorf("error sending buffer chunk %d-%d: %v", i, end, err)
+		}
 	}
 
 	e.sendCommand(0x22) // Display update control
