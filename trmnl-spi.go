@@ -420,7 +420,7 @@ func displayImage(imagePath string, options AppOptions) error {
 	}
 	defer file.Close()
 
-	buffer := make([]byte, 512)
+	buffer = make([]byte, 512)
 	_, err = file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("error reading image for detection: %v", err)
