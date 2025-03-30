@@ -42,6 +42,7 @@ def get_api_key():
     if not api_key:
         api_key = input("TRMNL API Key not found. Please enter your TRMNL API Key: ")
         save_config(api_key)
+    logging.debug(f"Loaded API key: {api_key}")
     return api_key
 
 def init_display():
@@ -74,10 +75,11 @@ def process_image(epd, api_key, dark_mode, verbose):
         "access-token": api_key,
         "User-Agent": f"trmnl-display/{VERSION}"
     }
-    logging.debug(f"Using API key: {api_key}")
+    logging.info("Fetching image from TRMNL API...")
     try:
         response = requests.get("https://usetrmnl.com/api/display", headers=headers, timeout=30)
         response.raise_for_status()
+        logging.debug(f"API response status: {response.status_code}")
     except requests.RequestException as e:
         logging.error(f"Error fetching display: {e}")
         time.sleep(60)
@@ -85,10 +87,11 @@ def process_image(epd, api_key, dark_mode, verbose):
 
     try:
         data = response.json()
+        logging.debug(f"Raw API response: {data}")
         image_url = data["image_url"]
         filename = data.get("filename", "display.jpg")
         refresh_rate = data.get("refresh_rate", 60)
-        logging.debug(f"API response: url={image_url}, filename={filename}, refresh={refresh_rate}")
+        logging.info(f"API parsed: url={image_url}, filename={filename}, refresh={refresh_rate}")
     except (json.JSONDecodeError, KeyError) as e:
         logging.error(f"Error parsing JSON: {e}")
         time.sleep(60)
@@ -97,10 +100,12 @@ def process_image(epd, api_key, dark_mode, verbose):
     with tempfile.TemporaryDirectory() as tmp_dir:
         file_path = os.path.join(tmp_dir, filename)
         try:
+            logging.info(f"Downloading image from {image_url}")
             img_response = requests.get(image_url, timeout=30)
             img_response.raise_for_status()
             with open(file_path, 'wb') as f:
                 f.write(img_response.content)
+            logging.debug(f"Image saved to {file_path}")
         except requests.RequestException as e:
             logging.error(f"Error downloading image: {e}")
             time.sleep(60)
@@ -137,6 +142,7 @@ def process_image(epd, api_key, dark_mode, verbose):
                     else:  # White
                         buffer[byte_pos] |= (1 << bit_offset)
 
+            logging.info("Displaying image...")
             epd.display(buffer)
             if verbose:
                 logging.info("Image displayed on Waveshare 7.5\" e-ink display")
