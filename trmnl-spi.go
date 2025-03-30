@@ -123,6 +123,8 @@ func initDisplay() error {
 	busyPin := gpioreg.ByName("GPIO24")
 	pwrPin := gpioreg.ByName("GPIO18")
 
+	fmt.Printf("RST: %v, DC: %v, CS: %v, BUSY: %v, PWR: %v\n", rstPin, dcPin, csPin, busyPin, pwrPin)
+
 	if rstPin == nil || dcPin == nil || csPin == nil || busyPin == nil || pwrPin == nil {
 		return fmt.Errorf("failed to find GPIO pins")
 	}
