@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	waveshare "github.com/ChristianHering/WaveShare" // Alias for clarity
