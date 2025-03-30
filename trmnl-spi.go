@@ -14,6 +14,7 @@ import (
 
 	waveshare "github.com/ChristianHering/WaveShare" // Alias for clarity
 	"github.com/disintegration/imaging"              // For image processing
+	_ "golang.org/x/image/bmp"                       // Register BMP decoder
 	_ "image/jpeg"                                  // Register JPEG decoder
 	_ "image/png"                                   // Register PNG decoder
 )
