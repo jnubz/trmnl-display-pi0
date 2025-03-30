@@ -76,14 +76,20 @@ def process_image(epd, api_key, dark_mode, verbose):
         "User-Agent": f"trmnl-display/{VERSION}"
     }
     logging.info("Fetching image from TRMNL API...")
-    try:
-        response = requests.get("https://usetrmnl.com/api/display", headers=headers, timeout=30)
-        response.raise_for_status()
-        logging.debug(f"API response status: {response.status_code}")
-    except requests.RequestException as e:
-        logging.error(f"Error fetching display: {e}")
-        time.sleep(60)
-        return
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.get("https://usetrmnl.com/api/display", headers=headers, timeout=30)
+            response.raise_for_status()
+            logging.debug(f"API response status: {response.status_code}")
+            break
+        except requests.RequestException as e:
+            logging.error(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(5)  # Reduced from 60s to 5s
+            else:
+                logging.error("Max retries reached. Skipping this cycle.")
+                return
 
     try:
         data = response.json()
@@ -94,22 +100,27 @@ def process_image(epd, api_key, dark_mode, verbose):
         logging.info(f"API parsed: url={image_url}, filename={filename}, refresh={refresh_rate}")
     except (json.JSONDecodeError, KeyError) as e:
         logging.error(f"Error parsing JSON: {e}")
-        time.sleep(60)
+        time.sleep(5)
         return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         file_path = os.path.join(tmp_dir, filename)
-        try:
-            logging.info(f"Downloading image from {image_url}")
-            img_response = requests.get(image_url, timeout=30)
-            img_response.raise_for_status()
-            with open(file_path, 'wb') as f:
-                f.write(img_response.content)
-            logging.debug(f"Image saved to {file_path}")
-        except requests.RequestException as e:
-            logging.error(f"Error downloading image: {e}")
-            time.sleep(60)
-            return
+        for attempt in range(max_retries):
+            try:
+                logging.info(f"Downloading image from {image_url}")
+                img_response = requests.get(image_url, timeout=30)
+                img_response.raise_for_status()
+                with open(file_path, 'wb') as f:
+                    f.write(img_response.content)
+                logging.debug(f"Image saved to {file_path}")
+                break
+            except requests.RequestException as e:
+                logging.error(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                else:
+                    logging.error("Max retries reached for image download. Skipping.")
+                    return
 
         if verbose:
             logging.info(f"Reading image from {file_path}")
@@ -149,7 +160,7 @@ def process_image(epd, api_key, dark_mode, verbose):
             time.sleep(max(refresh_rate, 1))
         except Exception as e:
             logging.error(f"Error displaying image: {e}")
-            time.sleep(60)
+            time.sleep(5)
 
 def main():
     parser = argparse.ArgumentParser(description="TRMNL e-ink display client")
