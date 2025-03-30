@@ -107,6 +107,7 @@ func main() {
 	defer os.RemoveAll(tmpDir)
 
 	clearDisplay()
+	testDisplay()
 
 	for {
 		processNextImage(tmpDir, config.APIKey, options)
@@ -251,9 +252,45 @@ func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
 	buffer := make([]byte, 800*480/8)
 	for i := range buffer {
-		buffer[i] = 0xFF // White
+		buffer[i] = 0xFF // White (assuming 1 = white)
 	}
-	epd.display(buffer)
+	err := epd.display(buffer)
+	if err != nil {
+		fmt.Printf("Error clearing display: %v\n", err)
+	}
+	time.Sleep(2 * time.Second) // Allow refresh
+}
+
+func (e *EPD) display(buffer []byte) error {
+	const maxTxSize = 4096 // Maximum bytes per SPI transfer
+
+	// Write black RAM
+	e.sendCommand(0x24)
+	e.dcPin.Out(gpio.High)
+	if e.conn == nil {
+		return fmt.Errorf("SPI connection is nil")
+	}
+	for i := 0; i < len(buffer); i += maxTxSize {
+		end := i + maxTxSize
+		if end > len(buffer) {
+			end = len(buffer)
+		}
+		chunk := buffer[i:end]
+		err := e.conn.Tx(chunk, nil)
+		if err != nil {
+			return fmt.Errorf("error sending buffer chunk %d-%d: %v", i, end, err)
+		}
+	}
+
+	// Update display (from epd7in5_V2.py)
+	e.sendCommand(0x22) // Display Update Control 2
+	e.sendData(0xC7)    // Enable clock, analog, and display
+	e.sendCommand(0x20) // Master Activation
+	for e.busyPin.Read() == gpio.High {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return nil
 }
 
 func (e *EPD) display(buffer []byte) error {
@@ -442,7 +479,7 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
-	// Convert to buffer (Black=0, White=1)
+	// In displayImage, replace buffer creation:
 	buffer = make([]byte, epd.Width*epd.Height/8)
 	for y := 0; y < epd.Height; y++ {
 		for x := 0; x < epd.Width; x++ {
@@ -451,9 +488,9 @@ func displayImage(imagePath string, options AppOptions) error {
 			bytePos := bitPos / 8
 			bitOffset := uint(7 - (bitPos % 8))
 			if gray == 0 { // Black
-				buffer[bytePos] &^= (1 << bitOffset) // Clear bit (0)
+				buffer[bytePos] |= (1 << bitOffset) // Set bit (1) for black
 			} else { // White
-				buffer[bytePos] |= (1 << bitOffset) // Set bit (1)
+				buffer[bytePos] &^= (1 << bitOffset) // Clear bit (0) for white
 			}
 		}
 	}
@@ -493,6 +530,22 @@ func parseCommandLineArgs() AppOptions {
 		DarkMode: *darkMode,
 		Verbose:  *verbose && !*quiet,
 	}
+}
+
+func testDisplay() {
+	fmt.Println("Testing display with pattern...")
+	buffer := make([]byte, 800*480/8)
+	for i := 0; i < len(buffer)/2; i++ {
+		buffer[i] = 0x00 // Black
+	}
+	for i := len(buffer)/2; i < len(buffer); i++ {
+		buffer[i] = 0xFF // White
+	}
+	err := epd.display(buffer)
+	if err != nil {
+		fmt.Printf("Error testing display: %v\n", err)
+	}
+	time.Sleep(2 * time.Second)
 }
 
 func loadConfig(configDir string) Config {
