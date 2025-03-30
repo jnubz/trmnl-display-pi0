@@ -10,15 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"os/user"
 	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/ChristianHering/WaveShare" // Waveshare e-Paper library
-	"github.com/disintegration/imaging"     // For image processing
-	_ "image/jpeg"                         // Register JPEG decoder
-	_ "image/png"                          // Register PNG decoder
+	waveshare "github.com/ChristianHering/WaveShare" // Alias to avoid case confusion
+	"github.com/disintegration/imaging"              // For image processing
+	_ "image/jpeg"                                  // Register JPEG decoder
+	_ "image/png"                                   // Register PNG decoder
 )
 
 // Version information
@@ -67,7 +66,7 @@ var (
 		Height:  480,
 	}
 	// Global Waveshare display instance for 7.5" V2
-	display *WaveShare.EPD7in5V2
+	display *waveshare.EPD7IN5V2
 )
 
 func main() {
@@ -119,7 +118,7 @@ func main() {
 
 // initDisplay initializes the Waveshare 7.5" V2 e-ink display
 func initDisplay() error {
-	display = WaveShare.NewEPD7in5V2(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
+	display = waveshare.NewEPD7IN5V2(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
 	err := display.Init()
 	if err != nil {
 		return fmt.Errorf("failed to initialize Waveshare EPD7in5_V2: %v", err)
