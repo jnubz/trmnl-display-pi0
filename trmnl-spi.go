@@ -65,8 +65,8 @@ var (
 		Width:   800, // EPD7in5_V2 resolution: 800x480
 		Height:  480,
 	}
-	// Global Waveshare display instance for 7.5" V2
-	display *waveshare.EPD7in5v2 // Adjusted type name
+	// Global Waveshare display instance
+	display *waveshare.EPD
 )
 
 func main() {
@@ -116,12 +116,12 @@ func main() {
 	}
 }
 
-// initDisplay initializes the Waveshare 7.5" V2 e-ink display
+// initDisplay initializes the Waveshare e-ink display
 func initDisplay() error {
-	display = waveshare.New7in5V2(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin) // Adjusted constructor
+	display = waveshare.NewEPD(spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
 	err := display.Init()
 	if err != nil {
-		return fmt.Errorf("failed to initialize Waveshare EPD7in5_V2: %v", err)
+		return fmt.Errorf("failed to initialize Waveshare e-ink display: %v", err)
 	}
 	fmt.Println("Waveshare 7.5\" e-ink display (V2) initialized successfully")
 	return nil
@@ -138,7 +138,7 @@ func cleanupDisplay() {
 // clearDisplay clears the e-ink display
 func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
-	err := display.Clear(0xFF) // 0xFF = white
+	err := display.Clear() // No argument, per library
 	if err != nil {
 		fmt.Printf("Error clearing display: %v\n", err)
 	}
@@ -298,7 +298,7 @@ func displayImage(imagePath string, options AppOptions) error {
 	// Display the image
 	err = display.Display(buffer)
 	if err != nil {
-		return fmt.Errorf("error displaying image on Waveshare EPD7in5_V2: %v", err)
+		return fmt.Errorf("error displaying image on Waveshare e-ink display: %v", err)
 	}
 
 	if options.Verbose {
