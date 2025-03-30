@@ -57,6 +57,7 @@ type EPD struct {
 	busyPin gpio.PinIO
 	pwrPin  gpio.PinIO
 	spiPort spi.PortCloser
+	conn    spi.Conn
 	Width   int
 	Height  int
 }
@@ -137,6 +138,11 @@ func initDisplay() error {
 		return fmt.Errorf("error setting SPI speed: %v", err)
 	}
 
+	conn, err := spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
+	if err != nil {
+		return fmt.Errorf("error connecting to SPI: %v", err)
+	}
+
 	epd = &EPD{
 		rstPin:  rstPin,
 		dcPin:   dcPin,
@@ -144,6 +150,7 @@ func initDisplay() error {
 		busyPin: busyPin,
 		pwrPin:  pwrPin,
 		spiPort: spiPort,
+		conn:    conn,
 		Width:   800,
 		Height:  480,
 	}
@@ -211,14 +218,18 @@ func (e *EPD) init() error {
 
 func (e *EPD) sendCommand(cmd byte) {
 	e.dcPin.Out(gpio.Low)
-	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
-	conn.Tx([]byte{cmd}, nil)
+	if e.conn == nil {
+		panic("SPI connection is nil")
+	}
+	e.conn.Tx([]byte{cmd}, nil)
 }
 
 func (e *EPD) sendData(data byte) {
 	e.dcPin.Out(gpio.High)
-	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
-	conn.Tx([]byte{data}, nil)
+	if e.conn == nil {
+		panic("SPI connection is nil")
+	}
+	e.conn.Tx([]byte{data}, nil)
 }
 
 func cleanupDisplay() {
@@ -247,9 +258,14 @@ func clearDisplay() {
 
 func (e *EPD) display(buffer []byte) error {
 	e.sendCommand(0x24) // Write RAM
-	conn, _ := e.spiPort.Connect(2*physic.MegaHertz, spi.Mode0, 8)
 	e.dcPin.Out(gpio.High)
-	conn.Tx(buffer, nil)
+	if e.conn == nil {
+		return fmt.Errorf("SPI connection is nil")
+	}
+	err := e.conn.Tx(buffer, nil)
+	if err != nil {
+		return fmt.Errorf("error sending buffer: %v", err)
+	}
 
 	e.sendCommand(0x22) // Display update control
 	e.sendData(0xC7)
