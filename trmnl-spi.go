@@ -420,12 +420,13 @@ func displayImage(imagePath string, options AppOptions) error {
 	}
 	defer file.Close()
 
-	buffer = make([]byte, 512)
-	_, err = file.Read(buffer)
+	// Use a different variable name to avoid shadowing
+	fileBuffer := make([]byte, 512)
+	_, err = file.Read(fileBuffer)
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("error reading image for detection: %v", err)
 	}
-	contentType := http.DetectContentType(buffer)
+	contentType := http.DetectContentType(fileBuffer)
 
 	_, err = file.Seek(0, 0)
 	if err != nil {
@@ -481,8 +482,9 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
-	// Convert to buffer (Black=0, White=1)
-	buffer := make([]byte, epd.Width*epd.Height/8)
+	// Declare buffer here
+	var buffer []byte
+	buffer = make([]byte, epd.Width*epd.Height/8)
 	for y := 0; y < epd.Height; y++ {
 		for x := 0; x < epd.Width; x++ {
 			gray := monoImg.GrayAt(x, y).Y
