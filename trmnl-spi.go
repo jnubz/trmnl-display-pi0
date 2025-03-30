@@ -231,6 +231,26 @@ func (e *EPD) sendData(data byte) {
 	e.conn.Tx([]byte{data}, nil)
 }
 
+func (e *EPD) sendData2(buffer []byte) error {
+	const maxTxSize = 4096
+	e.dcPin.Out(gpio.High)
+	if e.conn == nil {
+		return fmt.Errorf("SPI connection is nil")
+	}
+	for i := 0; i < len(buffer); i += maxTxSize {
+		end := i + maxTxSize
+		if end > len(buffer) {
+			end = len(buffer)
+		}
+		chunk := buffer[i:end]
+		err := e.conn.Tx(chunk, nil)
+		if err != nil {
+			return fmt.Errorf("error sending buffer chunk %d-%d: %v", i, end, err)
+		}
+	}
+	return nil
+}
+
 func cleanupDisplay() {
 	if epd != nil {
 		epd.sleep()
@@ -250,7 +270,7 @@ func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
 	buffer := make([]byte, 800*480/8)
 	for i := range buffer {
-		buffer[i] = 0x00 // White (assuming 1 = white)
+		buffer[i] = 0xFF // White
 	}
 	err := epd.display(buffer)
 	if err != nil {
@@ -276,28 +296,29 @@ func testDisplay() {
 }
 
 func (e *EPD) display(buffer []byte) error {
-	const maxTxSize = 4096 // Maximum bytes per SPI transfer
-
-	e.sendCommand(0x24) // Write RAM
-	e.dcPin.Out(gpio.High)
-	if e.conn == nil {
-		return fmt.Errorf("SPI connection is nil")
-	}
-	for i := 0; i < len(buffer); i += maxTxSize {
-		end := i + maxTxSize
-		if end > len(buffer) {
-			end = len(buffer)
-		}
-		chunk := buffer[i:end]
-		err := e.conn.Tx(chunk, nil)
-		if err != nil {
-			return fmt.Errorf("error sending buffer chunk %d-%d: %v", i, end, err)
-		}
+	// Create inverted buffer (image1)
+	image1 := make([]byte, len(buffer))
+	for i := range buffer {
+		image1[i] = ^buffer[i] // Bitwise NOT
 	}
 
-	e.sendCommand(0x22) // Display Update Control 2
-	e.sendData(0xC7)    // Enable clock, analog, and display
-	e.sendCommand(0x20) // Master Activation
+	// Send old data (inverted)
+	e.sendCommand(0x10)
+	err := e.sendData2(image1)
+	if err != nil {
+		return fmt.Errorf("error sending old data: %v", err)
+	}
+
+	// Send new data
+	e.sendCommand(0x13)
+	err = e.sendData2(buffer)
+	if err != nil {
+		return fmt.Errorf("error sending new data: %v", err)
+	}
+
+	// Refresh
+	e.sendCommand(0x12)
+	time.Sleep(100 * time.Millisecond)
 	for e.busyPin.Read() == gpio.High {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -461,7 +482,7 @@ func displayImage(imagePath string, options AppOptions) error {
 	}
 
 	// Convert to buffer (Black=0, White=1)
-	buffer = make([]byte, epd.Width*epd.Height/8)
+	buffer := make([]byte, epd.Width*epd.Height/8)
 	for y := 0; y < epd.Height; y++ {
 		for x := 0; x < epd.Width; x++ {
 			gray := monoImg.GrayAt(x, y).Y
