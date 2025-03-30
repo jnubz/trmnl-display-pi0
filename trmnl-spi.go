@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"time"
 
-	waveshare "github.com/ChristianHering/WaveShare" // Alias for clarity
-	"github.com/disintegration/imaging"              // For image processing
-	_ "image/jpeg"                                  // Register JPEG decoder
-	_ "image/png"                                   // Register PNG decoder
+	waveshare "github.com/wiless/waveshare" // New library
+	"github.com/disintegration/imaging"     // For image processing
+	_ "image/jpeg"                          // Register JPEG decoder
+	_ "image/png"                           // Register PNG decoder
 )
 
 // Version information
@@ -64,6 +64,8 @@ var (
 		Width:   800, // EPD7in5_V2 resolution: 800x480
 		Height:  480,
 	}
+
+	display *waveshare.EPD // Global EPD instance
 )
 
 func main() {
@@ -115,28 +117,35 @@ func main() {
 
 // initDisplay initializes the Waveshare e-ink display
 func initDisplay() error {
-	waveshare.Initialize()
+	var err error
+	display, err = waveshare.NewEPD(waveshare.EPD7in5v2, spiConfig.RSTPin, spiConfig.DCPin, spiConfig.CSPin, spiConfig.BusyPin)
+	if err != nil {
+		return fmt.Errorf("error creating EPD instance: %v", err)
+	}
+	err = display.Init()
+	if err != nil {
+		return fmt.Errorf("error initializing EPD: %v", err)
+	}
 	fmt.Println("Waveshare 7.5\" e-ink display (V2) initialized successfully")
 	return nil
 }
 
 // cleanupDisplay handles cleanup on exit
 func cleanupDisplay() {
-	waveshare.Sleep()
-	fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
-	waveshare.Exit() // Release SPI/GPIO
+	if display != nil {
+		display.Sleep()
+		fmt.Println("Waveshare 7.5\" e-ink display put to sleep")
+	}
 }
 
-// clearDisplay clears the e-ink display by displaying a white image
+// clearDisplay clears the e-ink display
 func clearDisplay() {
 	fmt.Println("Clearing e-ink display...")
-	whiteImg := image.NewGray(image.Rect(0, 0, spiConfig.Width, spiConfig.Height))
-	for y := 0; y < spiConfig.Height; y++ {
-		for x := 0; x < spiConfig.Width; x++ {
-			whiteImg.SetGray(x, y, color.Gray{255}) // White
-		}
+	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8) // 800x480 / 8 = 48000 bytes
+	for i := range buffer {
+		buffer[i] = 0xFF // All white
 	}
-	waveshare.DisplayImage(whiteImg)
+	display.Display(buffer)
 }
 
 // processNextImage handles fetching and displaying images
@@ -280,7 +289,7 @@ func displayImage(imagePath string, options AppOptions) error {
 
 	// Convert to monochrome (1-bit) for e-ink
 	monoImg := image.NewGray(resizedImg.Bounds())
-	threshold := uint8(128) // Adjust threshold as needed
+	threshold := uint8(128)
 	for y := 0; y < resizedImg.Bounds().Dy(); y++ {
 		for x := 0; x < resizedImg.Bounds().Dx(); x++ {
 			r, g, b, _ := resizedImg.At(x, y).RGBA()
@@ -289,27 +298,39 @@ func displayImage(imagePath string, options AppOptions) error {
 				if gray < threshold {
 					monoImg.SetGray(x, y, color.Gray{255}) // White
 				} else {
-					monoImg.SetGray(x, y, color.Gray{0}) // Black
+					monoImg.SetGray(x, y, color.Gray{0})   // Black
 				}
 			} else {
-				if gray >= threshold {
-					monoImg.SetGray(x, y, color.Gray{255}) // White
+				if gray < threshold {
+					monoImg.SetGray(x, y, color.Gray{0})   // Black
 				} else {
-					monoImg.SetGray(x, y, color.Gray{0}) // Black
+					monoImg.SetGray(x, y, color.Gray{255}) // White
 				}
 			}
 		}
 	}
 
-	// Debug: Save monochrome image
-	err = imaging.Save(monoImg, "debug_mono.png")
-	if err != nil {
-		return fmt.Errorf("error saving debug monochrome image: %v", err)
+	// Convert monoImg to byte buffer for waveshare
+	buffer := make([]byte, spiConfig.Width*spiConfig.Height/8) // 800x480 / 8 = 48000 bytes
+	for y := 0; y < spiConfig.Height; y++ {
+		for x := 0; x < spiConfig.Width; x++ {
+			gray := monoImg.GrayAt(x, y).Y
+			bitPos := y*spiConfig.Width + x
+			bytePos := bitPos / 8
+			bitOffset := uint(7 - (bitPos % 8))
+			if gray == 0 { // Black
+				buffer[bytePos] |= (1 << bitOffset)
+			} else { // White
+				buffer[bytePos] &^= (1 << bitOffset)
+			}
+		}
 	}
-	fmt.Println("Saved debug_mono.png for inspection")
 
-	// Display the monochrome image
-	waveshare.DisplayImage(monoImg)
+	// Display the buffer
+	err = display.Display(buffer)
+	if err != nil {
+		return fmt.Errorf("error displaying buffer: %v", err)
+	}
 
 	if options.Verbose {
 		fmt.Println("Image displayed on Waveshare 7.5\" e-ink display")
@@ -357,6 +378,6 @@ func saveConfig(configDir string, config Config) {
 	}
 	err = os.WriteFile(configFile, data, 0600)
 	if err != nil {
-		fmt.Printf("Error writing config file: %v\n", err)
+		fmt.Printf("Error writing config file: %v", err)
 	}
 }
