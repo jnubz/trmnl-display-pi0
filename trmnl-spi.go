@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	waveshare "github.com/ChristianHering/WaveShare" // Alias for clarity
 	"github.com/disintegration/imaging"              // For image processing
-	_ "golang.org/x/image/bmp"                       // Still included for BMP support
 	_ "image/jpeg"                                  // Register JPEG decoder
 	_ "image/png"                                   // Register PNG decoder
 )
@@ -226,44 +226,34 @@ func processNextImage(tmpDir, apiKey string, options AppOptions) {
 
 // displayImage processes and sends the image to the Waveshare e-ink display
 func displayImage(imagePath string, options AppOptions) error {
-	file, err := os.Open(imagePath)
+	if options.Verbose {
+		fmt.Printf("Reading image from %s\n", imagePath)
+	}
+
+	// Check if it's a BMP file and convert to PNG if so
+	var imgPath string
+	if strings.HasSuffix(strings.ToLower(imagePath), ".bmp") {
+		pngPath := imagePath + ".png"
+		cmd := exec.Command("convert", imagePath, pngPath)
+		err := cmd.Run()
+		if err != nil {
+			return fmt.Errorf("error converting BMP to PNG with convert: %v", err)
+		}
+		defer os.Remove(pngPath) // Clean up temporary PNG
+		imgPath = pngPath
+	} else {
+		imgPath = imagePath
+	}
+
+	file, err := os.Open(imgPath)
 	if err != nil {
 		return fmt.Errorf("error opening image file: %v", err)
 	}
 	defer file.Close()
 
-	if options.Verbose {
-		fmt.Printf("Reading image from %s\n", imagePath)
-	}
-
-	// Decode the image, falling back to PNG conversion if BMP fails
-	img, format, err := image.Decode(file)
+	img, _, err := image.Decode(file)
 	if err != nil {
-		if format == "bmp" {
-			// Reset file position and convert BMP to PNG
-			file.Seek(0, 0)
-			bmpImg, err := imaging.Decode(file)
-			if err != nil {
-				return fmt.Errorf("error decoding BMP image: %v", err)
-			}
-			pngPath := imagePath + ".png"
-			err = imaging.Save(bmpImg, pngPath, imaging.PNGCompressionLevel(png.DefaultCompression))
-			if err != nil {
-				return fmt.Errorf("error converting BMP to PNG: %v", err)
-			}
-			defer os.Remove(pngPath) // Clean up temporary PNG
-			file, err = os.Open(pngPath)
-			if err != nil {
-				return fmt.Errorf("error opening converted PNG: %v", err)
-			}
-			defer file.Close()
-			img, _, err = image.Decode(file)
-			if err != nil {
-				return fmt.Errorf("error decoding converted PNG: %v", err)
-			}
-		} else {
-			return fmt.Errorf("error decoding image (%s): %v", format, err)
-		}
+		return fmt.Errorf("error decoding image: %v", err)
 	}
 
 	// Resize image to match EPD7in5_V2 dimensions (800x480)
