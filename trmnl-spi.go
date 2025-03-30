@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	waveshare "github.com/ChristianHering/WaveShare" // Alias for clarity
@@ -230,9 +229,29 @@ func displayImage(imagePath string, options AppOptions) error {
 		fmt.Printf("Reading image from %s\n", imagePath)
 	}
 
-	// Check if it's a BMP file and convert to PNG if so
+	// Detect content type
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return fmt.Errorf("error opening image file for detection: %v", err)
+	}
+	defer file.Close()
+
+	// Read first 512 bytes for content type detection
+	buffer := make([]byte, 512)
+	_, err = file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("error reading image for detection: %v", err)
+	}
+	contentType := http.DetectContentType(buffer)
+
+	// Reset file position
+	_, err = file.Seek(0, 0)
+	if err != nil {
+		return fmt.Errorf("error resetting file pointer: %v", err)
+	}
+
 	var imgPath string
-	if strings.HasSuffix(strings.ToLower(imagePath), ".bmp") {
+	if contentType == "image/bmp" {
 		pngPath := imagePath + ".png"
 		cmd := exec.Command("convert", imagePath, pngPath)
 		err := cmd.Run()
@@ -245,13 +264,13 @@ func displayImage(imagePath string, options AppOptions) error {
 		imgPath = imagePath
 	}
 
-	file, err := os.Open(imgPath)
+	imgFile, err := os.Open(imgPath)
 	if err != nil {
 		return fmt.Errorf("error opening image file: %v", err)
 	}
-	defer file.Close()
+	defer imgFile.Close()
 
-	img, _, err := image.Decode(file)
+	img, _, err := image.Decode(imgFile)
 	if err != nil {
 		return fmt.Errorf("error decoding image: %v", err)
 	}
