@@ -149,9 +149,9 @@ def process_image(epd, api_key, dark_mode, verbose):
                     byte_pos = bit_pos // 8
                     bit_offset = 7 - (bit_pos % 8)
                     if mono_img.getpixel((x, y)) == 0:  # Black
-                        buffer[byte_pos] &= ~(1 << bit_offset)
-                    else:  # White
                         buffer[byte_pos] |= (1 << bit_offset)
+                    else:  # White
+                        buffer[byte_pos] &= ~(1 << bit_offset)
 
             logging.info("Displaying image...")
             epd.display(buffer)
