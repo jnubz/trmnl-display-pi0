@@ -301,6 +301,13 @@ func displayImage(imagePath string, options AppOptions) error {
 		}
 	}
 
+	// Debug: Save monochrome image
+	err = imaging.Save(monoImg, "debug_mono.png")
+	if err != nil {
+		return fmt.Errorf("error saving debug monochrome image: %v", err)
+	}
+	fmt.Println("Saved debug_mono.png for inspection")
+
 	// Display the monochrome image
 	waveshare.DisplayImage(monoImg)
 
