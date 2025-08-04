@@ -12,9 +12,9 @@ import logging
 import tempfile
 
 try:
-    from waveshare_epd import epd2in13V4
+    from waveshare_epd import epd2in13_V4
 except ImportError:
-    print("Error: Waveshare EPD library not found. Please ensure epd2in13V4.py is available.")
+    print("Error: Waveshare EPD library not found. Please ensure epd2in13_V4.py is available.")
     sys.exit(1)
 
 VERSION = "0.1.0"
@@ -47,10 +47,10 @@ def get_api_key():
 
 def init_display():
     try:
-        epd = epd7in5_V2.EPD()
+        epd = epd2in13_V4.EPD()
         epd.init()
 #         logging.info("Waveshare 7.5\" e-ink display (V2) initialized successfully")
-         logging.info("Waveshare 2.13\" e-ink display (V4) initialized successfully")
+        logging.info("Waveshare 2.13\" e-ink display (V4) initialized successfully")
         return epd
     except Exception as e:
         logging.error(f"Error initializing e-ink display: {e}")
@@ -191,7 +191,7 @@ def main():
     finally:
         epd.sleep()
 #         logging.info("Waveshare 7.5\" e-ink display put to sleep")
-         logging.info("Waveshare 2.13\" e-ink display put to sleep")
+        logging.info("Waveshare 2.13\" e-ink display put to sleep")
         epd.epdconfig.module_exit()
 
 if __name__ == "__main__":

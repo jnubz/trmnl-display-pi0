@@ -6,9 +6,9 @@ import (
 )
 
 func main() {
-    display, _ := waveshare.NewEPD(waveshare.EPD7in5v2, 17, 25, 8, 24)
+    display, _ := waveshare.NewEPD(waveshare.EPD2in13v4, 17, 25, 8, 24)
     display.Init()
-    buffer := make([]byte, 800*480/8)
+    buffer := make([]byte, 250*122/8)
     for i := 0; i < len(buffer)/2; i++ {
         buffer[i] = 0x00 // Half black
     }
