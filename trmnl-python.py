@@ -63,7 +63,7 @@ def clear_display(epd):
 def test_display(epd):
     logging.info("Testing display with pattern...")
     width, height = epd.width, epd.height
-    buffer = bytearray(width * height // 8)
+    buffer = bytearray(width * height + 7 // 8)
     for i in range(len(buffer) // 2):
         buffer[i] = 0x00  # Black
     for i in range(len(buffer) // 2, len(buffer)):
@@ -143,7 +143,7 @@ def process_image(epd, api_key, dark_mode, verbose):
             if verbose:
                 logging.info("Saved debug_buffer.png for inspection")
 
-            buffer = bytearray(epd.width * epd.height // 8)
+            buffer = bytearray(epd.width * epd.height + 7 // 8)
             for y in range(epd.height):
                 for x in range(epd.width):
                     bit_pos = y * epd.width + x
